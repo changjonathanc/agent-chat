@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat App</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Minimal custom styles for animations -->
+    <style>
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-in; }
+
+        .log-message {
+            background-color: #fef9c3;
+            color: #92400e;
+            padding: 4px 8px;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .structured-log-message {
+            background-color: #dbeafe;
+            color: #1e40af;
+            padding: 4px 8px;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        /* Link styles for messages */
+        .message-link {
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            transition: opacity 0.2s ease;
+        }
+
+        /* Links in gray bubbles (AI/other users) */
+        .bg-gray-200 .message-link {
+            color: #2563eb; /* blue-600 */
+        }
+
+        .bg-gray-200 .message-link:hover {
+            color: #1d4ed8; /* blue-700 */
+            opacity: 0.8;
+        }
+
+        /* Links in blue bubbles (current user) */
+        .bg-blue-600 .message-link {
+            color: #bfdbfe; /* blue-200 */
+        }
+
+        .bg-blue-600 .message-link:hover {
+            color: #ffffff;
+            opacity: 0.9;
+        }
+
+        /* Links in system messages */
+        .bg-yellow-100 .message-link {
+            color: #b45309; /* amber-700 */
+        }
+
+        .bg-yellow-100 .message-link:hover {
+            color: #92400e; /* amber-800 */
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col">
+    <div class="flex flex-col w-full h-full">
+        <!-- Status bar -->
+        <div class="py-2 border-b text-sm text-center text-gray-500 flex items-center justify-center gap-2">
+            <span id="status">Connecting...</span>
+            <button id="pauseResumeButton" style="display: none;"
+                    class="px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700">Pause</button>
+        </div>
+        <!-- Log toggle, research mode, and share button -->
+        <div class="py-2 border-b text-sm text-center flex justify-center items-center gap-4">
+            <label><input type="checkbox" id="logToggle" class="mr-1" />Show logs</label>
+            <button id="researchModeBtn" 
+                    class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"
+                    data-active="false">
+                Research Mode
+            </button>
+            <button id="shareButton" class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">Create Shared Chat</button>
+        </div>
+        
+
+        <!-- Messages area -->
+        <div id="messages" class="messages-section flex-1 overflow-y-auto p-4 space-y-4"></div>
+
+        <!-- Input area -->
+        <div class="p-4 border-t">
+            <div class="flex gap-2">
+                <input type="text" id="messageInput" placeholder="Type a message..." disabled
+                       class="flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring" />
+                <button id="sendButton" disabled
+                        class="px-4 py-2 bg-blue-600 text-white rounded-full disabled:bg-gray-400">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pre-join modal for shared sessions -->
+    <div id="prejoinModal" class="fixed inset-0 bg-gray-100 flex items-center justify-center" style="display: none; z-index: 1000;">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4 shadow-lg">
+            <h2 class="text-xl font-bold text-center mb-4">Join Shared Chat</h2>
+            <p class="text-gray-600 text-center mb-6">Choose how you'd like to appear in the conversation</p>
+            
+            <div class="space-y-4">
+                <input type="text" id="prejoinNameInput" placeholder="Enter your name" 
+                       class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                
+                <div class="flex gap-3">
+                    <button id="joinWithNameBtn" disabled
+                            class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
+                        Join with Name
+                    </button>
+                    <button id="joinAnonymousBtn"
+                            class="flex-1 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+                        Join as Anonymous
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invalid session modal -->
+    <div id="invalidSessionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style="display: none; z-index: 1000;">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 class="text-xl font-bold text-center mb-4 text-red-600">Session Not Found</h2>
+            <p class="text-gray-600 text-center mb-6">The session you're trying to join is invalid or no longer exists. Please create a new session to continue.</p>
+            
+            <div class="flex justify-center">
+                <button id="createNewSessionBtn"
+                        class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        autofocus>
+                    Create New Session
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat logic -->
+    <script>
+        // Detect if this is a shared session
+        const isSharedSession = window.location.pathname.includes('/session/');
+        const sessionId = isSharedSession ? window.location.pathname.split('/session/')[1] : null;
+        const wsUrl = isSharedSession ? `ws://${window.location.host}/ws/session/${sessionId}` : `ws://${window.location.host}/ws`;
+        
+        // UI elements
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const pauseResumeButton = document.getElementById('pauseResumeButton');
+        const statusDiv = document.getElementById('status');
+        const logToggle = document.getElementById('logToggle');
+        const researchModeBtn = document.getElementById('researchModeBtn');
+        const shareButton = document.getElementById('shareButton');
+        const prejoinModal = document.getElementById('prejoinModal');
+        const prejoinNameInput = document.getElementById('prejoinNameInput');
+        const joinWithNameBtn = document.getElementById('joinWithNameBtn');
+        const joinAnonymousBtn = document.getElementById('joinAnonymousBtn');
+        
+        let showLogs = false;
+        
+        // Initialize log visibility after DOM loads
+        function updateLogVisibility() {
+            document.querySelectorAll('.log-message, .structured-log-message').forEach(el => {
+                el.style.display = showLogs ? 'block' : 'none';
+            });
+        }
+        let ws = null;
+        let userChosenName = null; // Store the chosen name
+        let currentUserId = null; // Store the backend-assigned user ID
+        let isResearchMode = false; // Track current agent mode
+        
+        // Show modal for shared sessions
+        if (isSharedSession) {
+            // Check for name parameter in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const nameFromUrl = urlParams.get('name');
+            if (nameFromUrl) {
+                // Skip modal and connect directly with the provided name
+                userChosenName = nameFromUrl;
+                statusDiv.textContent = `Joining as ${nameFromUrl}...`;
+                connectWebSocket();
+            } else {
+                // Show modal for manual name entry
+                prejoinModal.style.display = 'flex';
+                statusDiv.textContent = 'Choose name to join...';
+                // Auto-focus the name input
+                prejoinNameInput.focus();
+            }
+        } else {
+            // Connect immediately for single-user sessions
+            connectWebSocket();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function linkifyUrls(text) {
+            // First escape HTML to prevent XSS
+            let safeText = escapeHtml(text);
+            
+            // Then convert URLs to clickable links
+            // This regex captures common URL patterns including those with paths, query params, and fragments
+            const urlRegex = /(https?:\/\/[^\s<>"{}|\\^\[\]`]+?)(?=[)\s]|$)/g;
+            
+            safeText = safeText.replace(urlRegex, function(url) {
+                // Remove trailing punctuation that might not be part of the URL
+                const cleanUrl = url.replace(/[.,;:!?]+$/, '');
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="message-link">${cleanUrl}</a>`;
+            });
+            
+            return safeText;
+        }
+
+        function isNearBottom() {
+            return messagesDiv.scrollHeight - messagesDiv.scrollTop <= messagesDiv.clientHeight + 50;
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        function addMessage(content, role, timestamp, userName = null, userId = null) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('flex', 'items-start', 'gap-2', 'animate-fadeIn');
+            
+            // Only put messages on the right if they're from the current user
+            const isCurrentUser = (role === 'human') && (!isSharedSession || userId === currentUserId);
+            if (isCurrentUser) {
+                messageDiv.classList.add('flex-row-reverse');
+            }
+            
+            messageDiv.dataset.timestamp = timestamp;
+
+            const bubbleDiv = document.createElement('div');
+            bubbleDiv.classList.add('rounded-2xl', 'px-4', 'py-3', 'max-w-[70%]', 'break-words');
+            if (isCurrentUser) {
+                // Current user's messages - blue on the right
+                bubbleDiv.classList.add('bg-blue-600', 'text-white', 'rounded-br-md');
+            } else if (role === 'human') {
+                // Other users' messages - gray on the left
+                bubbleDiv.classList.add('bg-gray-200', 'text-black', 'rounded-bl-md');
+            } else if (role === 'system') {
+                // System messages - yellow
+                bubbleDiv.classList.add('bg-yellow-100', 'text-yellow-800', 'rounded-md', 'italic');
+            } else {
+                // AI messages - gray on the left
+                bubbleDiv.classList.add('bg-gray-200', 'text-black', 'rounded-bl-md');
+            }
+
+            // Create header div for name and timestamp on same line
+            let headerDiv = null;
+            
+            // Add user name for shared sessions (for other users' messages and AI)
+            if (isSharedSession && !isCurrentUser) {
+                headerDiv = document.createElement('div');
+                headerDiv.classList.add('flex', 'justify-between', 'items-center', 'text-xs', 'mb-1', 'gap-2');
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.classList.add('font-semibold', 'text-gray-600');
+                
+                if (userName && role === 'human') {
+                    nameSpan.textContent = userName;
+                } else if (role === 'assistant') {
+                    nameSpan.textContent = 'Assistant';
+                }
+                
+                const timestampSpan = document.createElement('span');
+                timestampSpan.classList.add('text-gray-500');
+                timestampSpan.textContent = formatTimestamp(timestamp);
+                
+                headerDiv.appendChild(nameSpan);
+                headerDiv.appendChild(timestampSpan);
+                bubbleDiv.appendChild(headerDiv);
+            }
+
+            const contentDiv = document.createElement('div');
+            contentDiv.classList.add('whitespace-pre-wrap');
+            contentDiv.innerHTML = linkifyUrls(content);
+            bubbleDiv.appendChild(contentDiv);
+
+            // For current user messages or when no header, add timestamp separately
+            if (!headerDiv) {
+                const timestampDiv = document.createElement('div');
+                timestampDiv.classList.add('text-xs', 'mt-1');
+                if (isCurrentUser) {
+                    timestampDiv.classList.add('text-blue-200');
+                } else if (role === 'system') {
+                    timestampDiv.classList.add('text-yellow-600');
+                } else {
+                    timestampDiv.classList.add('text-gray-500');
+                }
+                timestampDiv.textContent = formatTimestamp(timestamp);
+
+                // Read indicator for current user's messages only
+                if (isCurrentUser) {
+                    const readIndicator = document.createElement('div');
+                    readIndicator.className = 'read-indicator ml-1 text-green-500 text-xs font-bold';
+                    readIndicator.style.display = 'none';
+                    timestampDiv.appendChild(readIndicator);
+                }
+                
+                bubbleDiv.appendChild(timestampDiv);
+            }
+            messageDiv.appendChild(bubbleDiv);
+            const shouldScroll = isNearBottom();
+            messagesDiv.appendChild(messageDiv);
+            if (shouldScroll) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+
+        function addLogMessage(content, timestamp) {
+            const logDiv = document.createElement('div');
+            logDiv.classList.add('log-message', 'animate-fadeIn', 'whitespace-pre-wrap');
+            logDiv.dataset.timestamp = timestamp;
+            logDiv.textContent = `[${formatTimestamp(timestamp)}] ${content}`;
+            logDiv.style.display = showLogs ? 'block' : 'none';
+            const shouldScroll = isNearBottom();
+            messagesDiv.appendChild(logDiv);
+            if (shouldScroll) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+
+        function addStructuredLogMessage(content, timestamp) {
+            const logDiv = document.createElement('div');
+            logDiv.classList.add('structured-log-message', 'animate-fadeIn', 'whitespace-pre-wrap');
+            logDiv.dataset.timestamp = timestamp;
+            logDiv.textContent = `[${formatTimestamp(timestamp)}] ${content}`;
+            logDiv.style.display = showLogs ? 'block' : 'none';
+            const shouldScroll = isNearBottom();
+            messagesDiv.appendChild(logDiv);
+            if (shouldScroll) {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+        }
+
+        function markMessagesAsRead(timestamps) {
+            timestamps.forEach(ts => {
+                const el = messagesDiv.querySelector(`[data-timestamp="${ts}"]`);
+                if (el) {
+                    const ri = el.querySelector('.read-indicator');
+                    if (ri) {
+                        ri.style.display = 'inline';
+                        ri.textContent = '✓';
+                    }
+                }
+            });
+        }
+
+
+        function updateStatus(text) {
+            statusDiv.textContent = text;
+            
+            // Show pause/resume button based on status
+            if (text === 'Paused') {
+                pauseResumeButton.style.display = 'inline-block';
+                pauseResumeButton.innerHTML = 'Resume';
+                pauseResumeButton.className = 'px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700';
+            } else if (text === 'Connected' || text === 'Running') {
+                pauseResumeButton.style.display = 'inline-block';
+                pauseResumeButton.innerHTML = 'Pause';
+                pauseResumeButton.className = 'px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700';
+            } else {
+                pauseResumeButton.style.display = 'none';
+            }
+        }
+
+        function updateResearchModeButton() {
+            if (isResearchMode) {
+                researchModeBtn.className = 'px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700';
+                researchModeBtn.textContent = '✓ Research Mode';
+                researchModeBtn.setAttribute('data-active', 'true');
+            } else {
+                researchModeBtn.className = 'px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300';
+                researchModeBtn.textContent = 'Research Mode';
+                researchModeBtn.setAttribute('data-active', 'false');
+            }
+        }
+
+        function toggleResearchMode() {
+            const newMode = !isResearchMode;
+            const agentType = newMode ? 'research' : 'default';
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'switch_agent',
+                    agent_type: agentType,
+                    timestamp: new Date().toISOString()
+                }));
+            }
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && ws && ws.readyState === WebSocket.OPEN) {
+                const timestamp = new Date().toISOString();
+                ws.send(JSON.stringify({ 
+                    type: 'user_message',
+                    content: message, 
+                    timestamp: timestamp 
+                }));
+                
+                // For single-user sessions, add message locally
+                // For shared sessions, message will come back via broadcast
+                if (!isSharedSession) {
+                    addMessage(message, 'human', timestamp, userChosenName);
+                }
+                
+                messageInput.value = '';
+                messageInput.focus();
+            }
+        }
+
+        function sendPauseResumeSignal() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const timestamp = new Date().toISOString();
+                const currentStatus = statusDiv.textContent;
+                
+                if (currentStatus === 'Running' || currentStatus === 'Connected') {
+                    ws.send(JSON.stringify({ 
+                        type: 'pause',
+                        timestamp: timestamp 
+                    }));
+                    // Visual feedback
+                    pauseResumeButton.disabled = true;
+                    pauseResumeButton.innerHTML = 'Pausing...';
+                    setTimeout(() => {
+                        pauseResumeButton.disabled = false;
+                    }, 500);
+                } else if (currentStatus === 'Paused') {
+                    ws.send(JSON.stringify({ 
+                        type: 'resume',
+                        timestamp: timestamp 
+                    }));
+                    // Visual feedback
+                    pauseResumeButton.disabled = true;
+                    pauseResumeButton.innerHTML = 'Resuming...';
+                    setTimeout(() => {
+                        pauseResumeButton.disabled = false;
+                    }, 500);
+                }
+            }
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                updateStatus('Connected');
+                statusDiv.classList.replace('text-gray-500', 'text-green-600');
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                
+                if (isSharedSession) {
+                    // Send user join message with chosen name for shared sessions
+                    ws.send(JSON.stringify({ type: 'user_join', user_name: userChosenName }));
+                } else {
+                    // Send timezone info for regular sessions
+                    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                    const offset = new Date().getTimezoneOffset();
+                    ws.send(JSON.stringify({ type: 'timezone', timezone: tz, offset }));
+                }
+                
+                messageInput.focus();
+            };
+            
+            ws.onclose = (event) => {
+                if (event.code === 1008 && isSharedSession) {
+                    // Session not found - show modal and redirect
+                    const modal = document.getElementById('invalidSessionModal');
+                    modal.style.display = 'flex';
+                    // Focus the button when modal is shown
+                    document.getElementById('createNewSessionBtn').focus();
+                } else {
+                    updateStatus('Disconnected');
+                    statusDiv.classList.replace('text-green-600', 'text-red-600');
+                    messageInput.disabled = true;
+                    sendButton.disabled = true;
+                }
+            };
+
+            ws.onerror = () => {
+                updateStatus('Connection error');
+                statusDiv.classList.replace('text-green-600', 'text-red-600');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'user_assigned') {
+                    // Store the backend-assigned user ID
+                    currentUserId = data.user_id;
+                    console.log(`Assigned user ID: ${currentUserId}, name: ${data.user_name || 'anonymous'}`);
+                } else if (data.type === 'chat') {
+                    // Extract user info for shared sessions
+                    const userName = data.user_name || null;
+                    const userId = data.user_id || null;
+                    const role = data.user_name !== undefined || data.user_id !== undefined ? 'human' : 'assistant';
+                    addMessage(data.content, role, data.timestamp, userName, userId);
+                } else if (data.type === 'system') {
+                    addMessage(data.content, 'system', data.timestamp || new Date().toISOString());
+                } else if (data.type === 'log') {
+                    addLogMessage(data.content, data.timestamp);
+                } else if (data.type === 'structured_log') {
+                    addStructuredLogMessage(data.content, data.timestamp);
+                } else if (data.type === 'state') {
+                    updateStatus(data.status);
+                } else if (data.type === 'read_receipt') {
+                    markMessagesAsRead(data.timestamps);
+                } else if (data.type === 'agent_switched') {
+                    // Handle agent switch confirmation
+                    isResearchMode = data.agent_type === 'research';
+                    updateResearchModeButton();
+                    
+                    // Show system message
+                    if (data.message) {
+                        addMessage(data.message, 'system', new Date().toISOString());
+                    }
+                }
+            };
+        }
+
+        // Modal event handlers for shared sessions
+        if (isSharedSession) {
+            // Enable/disable join with name button based on input
+            prejoinNameInput.addEventListener('input', () => {
+                const hasName = prejoinNameInput.value.trim().length > 0;
+                joinWithNameBtn.disabled = !hasName;
+            });
+            
+            // Join with name
+            joinWithNameBtn.addEventListener('click', () => {
+                userChosenName = prejoinNameInput.value.trim();
+                prejoinModal.style.display = 'none';
+                connectWebSocket();
+            });
+            
+            // Join as anonymous
+            joinAnonymousBtn.addEventListener('click', () => {
+                userChosenName = null;
+                prejoinModal.style.display = 'none';
+                connectWebSocket();
+            });
+            
+            // Enter key to join with name (if name is entered)
+            prejoinNameInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !joinWithNameBtn.disabled) {
+                    joinWithNameBtn.click();
+                }
+            });
+        }
+
+        // Invalid session modal handler
+        const createNewSessionHandler = async () => {
+            try {
+                // Create new session via API
+                const response = await fetch('/api/create-session', { method: 'POST' });
+                const data = await response.json();
+                
+                // Redirect to new session with user's chosen name
+                const nameParam = userChosenName ? `?name=${encodeURIComponent(userChosenName)}` : '';
+                window.location.href = `/session/${data.session_id}${nameParam}`;
+            } catch (error) {
+                console.error('Failed to create new session:', error);
+                // Fallback to home page
+                window.location.href = '/';
+            }
+        };
+        
+        document.getElementById('createNewSessionBtn').addEventListener('click', createNewSessionHandler);
+        
+        // Allow Enter key to trigger the button
+        document.getElementById('invalidSessionModal').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                createNewSessionHandler();
+            }
+        });
+
+        logToggle.addEventListener('change', () => {
+            showLogs = logToggle.checked;
+            updateLogVisibility();
+        });
+
+        // Create shared session handler
+        shareButton.onclick = async () => {
+            try {
+                const response = await fetch('/api/create-session', { method: 'POST' });
+                const data = await response.json();
+                const sessionUrl = `${window.location.origin}/session/${data.session_id}`;
+                window.open(sessionUrl, '_blank');
+            } catch (error) {
+                console.error('Failed to create shared session:', error);
+            }
+        };
+
+        // Research mode button handler
+        researchModeBtn.onclick = toggleResearchMode;
+
+        sendButton.onclick = sendMessage;
+        pauseResumeButton.onclick = sendPauseResumeSignal;
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
