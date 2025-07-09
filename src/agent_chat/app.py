@@ -441,7 +441,7 @@ async def handle_shared_websocket_session(websocket: WebSocket, session_id: str)
         or session_data.processing_task.done()
     ):
         session_data.processing_task = asyncio.create_task(
-            message_loop(session_data.agent, session_data.ui_plugin)
+            message_loop(lambda: session_data.agent, session_data.ui_plugin)
         )
 
     try:
