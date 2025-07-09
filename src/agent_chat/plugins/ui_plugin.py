@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import WebSocket
@@ -155,6 +156,7 @@ class BaseUIPlugin:
             "type": "chat",
             "content": content,
             "timestamp": datetime.now().isoformat(),
+            "message_id": str(uuid.uuid4()),  # Generate message ID for AI responses
         }
         await self._send_to_ui(message_data)
 
@@ -199,9 +201,10 @@ class BaseUIPlugin:
         additional_messages = collect_all_pending(self.message_queue)
         messages = [first_message_data] + additional_messages
 
-        # Send read receipts for all collected messages
-        timestamps = [msg_data["timestamp"] for msg_data in messages]
-        await self._send_to_ui({"type": "read_receipt", "timestamps": timestamps})
+        # Send read receipts for all collected messages that have message_ids
+        message_ids = [msg_data["message_id"] for msg_data in messages if "message_id" in msg_data]
+        if message_ids:
+            await self._send_to_ui({"type": "read_receipt", "message_ids": message_ids})
 
         # Format all messages for the model
         return await self._format_messages_for_model(messages)
@@ -347,6 +350,7 @@ class MultiplayerUIPlugin(BaseUIPlugin):
             "type": "chat",
             "content": content,
             "timestamp": datetime.now().isoformat(),
+            "message_id": str(uuid.uuid4()),  # Generate message ID for AI messages
             "user_name": "Assistant",
             "user_id": -1,  # Special ID for AI
         }

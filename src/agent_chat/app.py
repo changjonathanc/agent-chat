@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,12 +32,14 @@ def get_default_system_prompt() -> str:
     return """You are a helpful AI assistant in a chat interface.
 Be concise, friendly, and direct in your responses. When users send multiple messages in quick succession, address all their points comprehensively in a single response.
 
+- acknowledge user's message immediately 
+- break down your response into smaller chunks
+
 <tool usage guide>
 - you can use multiple tools in parallel in a single turn
 - use as many tools in a single turn as possible to minimaize latency
 example:
 - send_message to notify user what you are going to search, and at the same time, call the actual web search
-
 </tool usage guide>"""
 
 
@@ -301,6 +305,7 @@ async def handle_websocket_session(websocket: WebSocket):
                 "type": msg.get("type", "user_message"),
                 "content": msg.get("content", ""),
                 "timestamp": msg.get("timestamp", ""),
+                "message_id": str(uuid.uuid4()),  # Generate message ID for single-user mode
             }
         ),
     )
@@ -329,6 +334,7 @@ async def handle_websocket_session(websocket: WebSocket):
                             "type": msg.get("type", "user_message"),
                             "content": msg.get("content", ""),
                             "timestamp": msg.get("timestamp", ""),
+                            "message_id": str(uuid.uuid4()),  # Generate message ID for single-user mode
                         }
                     ),
                 )
@@ -454,11 +460,18 @@ async def handle_shared_websocket_session(websocket: WebSocket, session_id: str)
                 await process_websocket_message(message_data, session_data.ui_plugin)
             else:
                 # Handle user messages with shared session-specific logic
+                # Generate unique message ID for read receipts
+                message_id = str(uuid.uuid4())
+                timestamp = message_data.get("timestamp", "")
+                if not timestamp:
+                    timestamp = datetime.now().isoformat()
+                
                 # Broadcast user message to all other users in the session
                 user_message_broadcast = {
                     "type": "chat",
                     "content": message_data.get("content", ""),
-                    "timestamp": message_data.get("timestamp", ""),
+                    "timestamp": timestamp,
+                    "message_id": message_id,
                 }
                 # Add user attribution for frontend
                 if user_info.name:
@@ -473,7 +486,8 @@ async def handle_shared_websocket_session(websocket: WebSocket, session_id: str)
                 structured_message = {
                     "type": message_data.get("type", "user_message"),
                     "content": message_data.get("content", ""),
-                    "timestamp": message_data.get("timestamp", ""),
+                    "timestamp": timestamp,  # Use the same timestamp as broadcast
+                    "message_id": message_id,  # Include message ID for read receipts
                     "websocket": websocket,
                 }
                 await session_data.ui_plugin.add_message(structured_message)

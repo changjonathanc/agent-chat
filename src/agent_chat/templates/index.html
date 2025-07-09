@@ -54,6 +54,16 @@
             opacity: 0.9;
         }
 
+        /* Links in green bubbles (AI messages) */
+        .bg-green-50 .message-link {
+            color: #059669; /* green-600 */
+        }
+
+        .bg-green-50 .message-link:hover {
+            color: #047857; /* green-700 */
+            opacity: 0.8;
+        }
+
         /* Links in system messages */
         .bg-yellow-100 .message-link {
             color: #b45309; /* amber-700 */
@@ -227,7 +237,7 @@
             return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
-        function addMessage(content, role, timestamp, userName = null, userId = null) {
+        function addMessage(content, role, timestamp, userName = null, userId = null, messageId = null) {
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('flex', 'items-start', 'gap-2', 'animate-fadeIn');
             
@@ -237,7 +247,9 @@
                 messageDiv.classList.add('flex-row-reverse');
             }
             
-            messageDiv.dataset.timestamp = timestamp;
+            if (messageId) {
+                messageDiv.dataset.messageId = messageId;
+            }
 
             const bubbleDiv = document.createElement('div');
             bubbleDiv.classList.add('rounded-2xl', 'px-4', 'py-3', 'max-w-[70%]', 'break-words');
@@ -251,8 +263,8 @@
                 // System messages - yellow
                 bubbleDiv.classList.add('bg-yellow-100', 'text-yellow-800', 'rounded-md', 'italic');
             } else {
-                // AI messages - gray on the left
-                bubbleDiv.classList.add('bg-gray-200', 'text-black', 'rounded-bl-md');
+                // AI messages - subtle green on the left
+                bubbleDiv.classList.add('bg-green-50', 'text-green-800', 'rounded-bl-md', 'border', 'border-green-200');
             }
 
             // Create header div for name and timestamp on same line
@@ -343,9 +355,9 @@
             }
         }
 
-        function markMessagesAsRead(timestamps) {
-            timestamps.forEach(ts => {
-                const el = messagesDiv.querySelector(`[data-timestamp="${ts}"]`);
+        function markMessagesAsRead(messageIds) {
+            messageIds.forEach(msgId => {
+                const el = messagesDiv.querySelector(`[data-message-id="${msgId}"]`);
                 if (el) {
                     const ri = el.querySelector('.read-indicator');
                     if (ri) {
@@ -504,7 +516,8 @@
                     const userName = data.user_name || null;
                     const userId = data.user_id || null;
                     const role = data.user_name !== undefined || data.user_id !== undefined ? 'human' : 'assistant';
-                    addMessage(data.content, role, data.timestamp, userName, userId);
+                    const messageId = data.message_id || null;
+                    addMessage(data.content, role, data.timestamp, userName, userId, messageId);
                 } else if (data.type === 'system') {
                     addMessage(data.content, 'system', data.timestamp || new Date().toISOString());
                 } else if (data.type === 'log') {
@@ -514,7 +527,7 @@
                 } else if (data.type === 'state') {
                     updateStatus(data.status);
                 } else if (data.type === 'read_receipt') {
-                    markMessagesAsRead(data.timestamps);
+                    markMessagesAsRead(data.message_ids);
                 } else if (data.type === 'agent_switched') {
                     // Handle agent switch confirmation
                     isResearchMode = data.agent_type === 'research';
