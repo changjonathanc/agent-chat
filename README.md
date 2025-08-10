@@ -37,6 +37,11 @@ echo "OPENAI_API_KEY=your-api-key-here" > .env
 echo "GOOGLE_SEARCH_API_KEY=your-search-api-key" >> .env
 echo "GOOGLE_SEARCH_ENGINE_ID=6398277409ff848d1" >> .env
 
+# clone and run
+git clone http://github.com/changjonathanc/agent-chat.git
+cd agent-chat
+uv run -m agent_chat
+
 # run with uvx
 uvx git+http://github.com/changjonathanc/agent-chat.git
 # Access at http://localhost:8000
