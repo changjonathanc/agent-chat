@@ -83,9 +83,25 @@
             <button id="pauseResumeButton" style="display: none;"
                     class="px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700">Pause</button>
         </div>
-        <!-- Log toggle, research mode, and share button -->
-        <div class="py-2 border-b text-sm text-center flex justify-center items-center gap-4">
+        <!-- Log toggle, model/effort, research mode, and share button -->
+        <div class="py-2 border-b text-sm text-center flex justify-center items-center gap-4 flex-wrap">
             <label><input type="checkbox" id="logToggle" class="mr-1" />Show logs</label>
+            <div class="flex items-center gap-2">
+                <label for="modelSelect" class="text-gray-600">Model</label>
+                <select id="modelSelect" class="px-2 py-1 border rounded text-xs">
+                    <option value="gpt-5">gpt-5</option>
+                    <option value="o3">o3</option>
+                </select>
+            </div>
+            <div class="flex items-center gap-2">
+                <label for="effortSelect" class="text-gray-600">Effort</label>
+                <select id="effortSelect" class="px-2 py-1 border rounded text-xs">
+                    <option value="minimal">minimal</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                </select>
+            </div>
             <button id="researchModeBtn" 
                     class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"
                     data-active="false">
@@ -164,6 +180,8 @@
         const statusDiv = document.getElementById('status');
         const logToggle = document.getElementById('logToggle');
         const researchModeBtn = document.getElementById('researchModeBtn');
+        const modelSelect = document.getElementById('modelSelect');
+        const effortSelect = document.getElementById('effortSelect');
         const shareButton = document.getElementById('shareButton');
         const prejoinModal = document.getElementById('prejoinModal');
         const prejoinNameInput = document.getElementById('prejoinNameInput');
@@ -182,6 +200,33 @@
         let userChosenName = null; // Store the chosen name
         let currentUserId = null; // Store the backend-assigned user ID
         let isResearchMode = false; // Track current agent mode
+        let currentConfig = { model: 'gpt-5', effort: 'minimal' };
+
+        function allowedEffortsFor(model) {
+            return model === 'o3' ? ['low', 'medium', 'high'] : ['minimal', 'low', 'medium', 'high'];
+        }
+
+        function clampEffortFor(model, effort) {
+            const allowed = allowedEffortsFor(model);
+            if (model === 'o3' && effort === 'minimal') return 'low';
+            return allowed.includes(effort) ? effort : allowed[0];
+        }
+
+        function refreshEffortOptions(model, selected) {
+            const allowed = allowedEffortsFor(model);
+            effortSelect.innerHTML = '';
+            allowed.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = o.textContent = opt;
+                effortSelect.appendChild(o);
+            });
+            effortSelect.value = clampEffortFor(model, selected || effortSelect.value);
+        }
+
+        function setControlsDisabled(disabled) {
+            modelSelect.disabled = disabled;
+            effortSelect.disabled = disabled;
+        }
         
         // Show modal for shared sessions
         if (isSharedSession) {
@@ -481,7 +526,16 @@
                     const offset = new Date().getTimezoneOffset();
                     ws.send(JSON.stringify({ type: 'timezone', timezone: tz, offset }));
                 }
-                
+                // After connect, send initial config (from localStorage or defaults)
+                try {
+                    const savedModel = localStorage.getItem('ac_model') || currentConfig.model;
+                    const savedEffort = localStorage.getItem('ac_effort') || currentConfig.effort;
+                    modelSelect.value = savedModel;
+                    refreshEffortOptions(savedModel, savedEffort);
+                    const effectiveEffort = effortSelect.value;
+                    ws.send(JSON.stringify({ type: 'config', model: savedModel, effort: effectiveEffort }));
+                } catch (e) { /* ignore */ }
+
                 messageInput.focus();
             };
             
@@ -526,6 +580,17 @@
                     addStructuredLogMessage(data.content, data.timestamp);
                 } else if (data.type === 'state') {
                     updateStatus(data.status);
+                    setControlsDisabled(data.status === 'Running');
+                } else if (data.type === 'config') {
+                    // Server echoed effective config; update UI and persist
+                    const { model, effort } = data;
+                    currentConfig = { model, effort };
+                    modelSelect.value = model;
+                    refreshEffortOptions(model, effort);
+                    try {
+                        localStorage.setItem('ac_model', model);
+                        localStorage.setItem('ac_effort', effort);
+                    } catch (e) { /* ignore */ }
                 } else if (data.type === 'read_receipt') {
                     markMessagesAsRead(data.message_ids);
                 } else if (data.type === 'agent_switched') {
@@ -623,6 +688,24 @@
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
+            }
+        });
+
+        // Model/effort controls handlers
+        modelSelect.addEventListener('change', () => {
+            const model = modelSelect.value;
+            refreshEffortOptions(model, effortSelect.value);
+            const effort = effortSelect.value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'config', model, effort }));
+            }
+        });
+        effortSelect.addEventListener('change', () => {
+            const model = modelSelect.value;
+            const effort = clampEffortFor(model, effortSelect.value);
+            effortSelect.value = effort;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'config', model, effort }));
             }
         });
     </script>

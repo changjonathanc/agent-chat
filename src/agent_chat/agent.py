@@ -46,6 +46,7 @@ class Agent:
 
         self.max_iterations = max_iterations  # Prevent infinite tool call loops
         self.model_name = model_name
+        self.reasoning_effort = "minimal"  # default; can be changed via config
 
         # Create agent-specific logger with automatic agent_id injection
         self.logger = AgentLoggerAdapter(logger, agent_id or "main")
@@ -195,7 +196,7 @@ class Agent:
             "stream": True,
             "include": ["reasoning.encrypted_content"],
             "parallel_tool_calls": True,
-            "reasoning": {"summary": "auto", "effort": "minimal"},
+            "reasoning": {"summary": "auto", "effort": self.reasoning_effort},
         }
 
         # Start streaming response using new Responses API
@@ -303,3 +304,41 @@ class Agent:
         """
         self.conversation_context = context.copy()
         self.logger.info(f"Imported conversation context with {len(context)} items")
+
+    # Configuration helpers
+    def set_model_and_effort(self, model: str | None = None, effort: str | None = None) -> dict:
+        """Set model and reasoning effort with validation and clamping.
+
+        Returns the effective values that were applied.
+        """
+        allowed_models = {"gpt-5", "o3"}
+        allowed_effort = {
+            "gpt-5": ["minimal", "low", "medium", "high"],
+            "o3": ["low", "medium", "high"],
+        }
+
+        effective_model = self.model_name
+        effective_effort = self.reasoning_effort
+
+        if model:
+            if model not in allowed_models:
+                model = self.model_name  # ignore invalid
+            effective_model = model
+
+        if effort:
+            # Clamp effort to model's allowed set; map minimal->low for o3
+            if effective_model == "o3" and effort == "minimal":
+                effort = "low"
+            if effort not in allowed_effort.get(effective_model, []):
+                # fallback to current or default
+                effort = (
+                    self.reasoning_effort
+                    if self.reasoning_effort in allowed_effort.get(effective_model, [])
+                    else allowed_effort.get(effective_model, ["low"])[0]
+                )
+            effective_effort = effort
+
+        # Apply
+        self.model_name = effective_model
+        self.reasoning_effort = effective_effort
+        return {"model": effective_model, "effort": effective_effort}

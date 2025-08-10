@@ -324,6 +324,14 @@ async def handle_websocket_session(websocket: WebSocket):
             if message_data.get("type") == "switch_agent":
                 agent_type = message_data.get("agent_type", "default")
                 await switch_agent_type(agent_type)
+            elif message_data.get("type") == "config":
+                # Update model/effort on the current agent and echo back
+                effective = current_agent.set_model_and_effort(
+                    model=message_data.get("model"), effort=message_data.get("effort")
+                )
+                await ui_plugin._send_to_ui(
+                    {"type": "config", "model": effective["model"], "effort": effective["effort"]}
+                )
             else:
                 # Use common message processing
                 await process_websocket_message(
@@ -458,6 +466,14 @@ async def handle_shared_websocket_session(websocket: WebSocket, session_id: str)
             # Handle timezone/pause/resume with common function
             if message_data.get("type") in ["timezone", "pause", "resume"]:
                 await process_websocket_message(message_data, session_data.ui_plugin)
+            elif message_data.get("type") == "config":
+                effective = session_data.agent.set_model_and_effort(
+                    model=message_data.get("model"), effort=message_data.get("effort")
+                )
+                # Broadcast effective config to all users
+                await session_data.ui_plugin._send_to_ui(
+                    {"type": "config", "model": effective["model"], "effort": effective["effort"]}
+                )
             else:
                 # Handle user messages with shared session-specific logic
                 # Generate unique message ID for read receipts
