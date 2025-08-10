@@ -266,8 +266,13 @@ class Agent:
                         else:
                             content_text = str(item.content)
 
-                    # Log it
-                    self.log_item(item.type, {"content": content_text})
+                    # Log it (include role when available for message items)
+                    log_payload = {"content": content_text}
+                    if item.type == "message":
+                        role = getattr(item, "role", None)
+                        if role is not None:
+                            log_payload["role"] = role
+                    self.log_item(item.type, log_payload)
 
                     # Apply hooks if needed
                     if content_text.strip() and (
