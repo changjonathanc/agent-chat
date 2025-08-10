@@ -27,7 +27,7 @@ class Agent:
     def __init__(
         self,
         plugins: list,
-        model_name: str = "o3",
+        model_name: str = "gpt-5",
         system_prompt: str = "You are a helpful assistant.",
         log_handler=None,
         max_iterations=100,
@@ -195,7 +195,7 @@ class Agent:
             "stream": True,
             "include": ["reasoning.encrypted_content"],
             "parallel_tool_calls": True,
-            "reasoning": {"summary": "auto"},
+            "reasoning": {"summary": "auto", "effort": "minimal"},
         }
 
         # Start streaming response using new Responses API
