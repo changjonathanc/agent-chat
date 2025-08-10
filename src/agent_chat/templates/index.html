@@ -102,11 +102,16 @@
                     <option value="high">high</option>
                 </select>
             </div>
-            <button id="researchModeBtn" 
-                    class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"
-                    data-active="false">
-                Research Mode
-            </button>
+            <div class="relative inline-block group">
+                <button id="researchModeBtn" 
+                        class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded hover:bg-gray-300"
+                        data-active="false">
+                    Research Mode
+                </button>
+                <div class="absolute left-1/2 -translate-x-1/2 top-full mt-1 w-80 max-w-xs rounded bg-gray-900 text-white text-xs px-3 py-2 shadow opacity-0 invisible transition-opacity duration-100 group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible z-10">
+                    research mode is an experimental feature that let's the main agent spawn and manage subagents on demand for more intensive research tasks
+                </div>
+            </div>
             <button id="shareButton" class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700">Create Shared Chat</button>
         </div>
         
