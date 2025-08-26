@@ -23,6 +23,143 @@ class AgentLoggerAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
+class Environment:
+    """Environment owns tools, hooks, and stream event handling."""
+
+    def __init__(self, base_system_prompt: str, plugins: list, logger: logging.Logger):
+        self.base_system_prompt = base_system_prompt
+        self.plugins = plugins
+        self.logger = logger
+
+        # Initialize tool registry and register plugin tools
+        self.tool_registry = ToolRegistry()
+        for plugin in plugins:
+            if hasattr(plugin, "hook_provide_tools"):
+                for method in plugin.hook_provide_tools():
+                    self.tool_registry.register_callable(method)
+
+        # Build complete system prompt
+        self._instructions = self._assemble_system_prompt()
+
+    def _assemble_system_prompt(self) -> str:
+        instructions = self.base_system_prompt
+        additions = []
+        for plugin in self.plugins:
+            if hasattr(plugin, "hook_provide_system_prompt"):
+                try:
+                    addition = plugin.hook_provide_system_prompt()
+                    if addition and addition.strip():
+                        additions.append(addition.strip())
+                except Exception as e:
+                    self.logger.error(
+                        f"Error collecting system prompt from {plugin.__class__.__name__}: {e}"
+                    )
+        if additions:
+            instructions = f"{instructions}\n\n" + "\n\n".join(additions)
+        return instructions
+
+    def instructions(self) -> str:
+        """Return the assembled system prompt."""
+        return self._instructions
+
+    def tool_schemas(self, provider: str) -> list:
+        """Return provider-shaped tool schemas."""
+        # Provider is unused in this phase but kept for compatibility
+        return self.tool_registry.get_schemas()
+
+    async def _apply_hook(self, hook_name: str, value):
+        for plugin in self.plugins:
+            if hasattr(plugin, hook_name):
+                try:
+                    result = await getattr(plugin, hook_name)(value)
+                    if result is not None:
+                        value = result
+                except Exception as e:
+                    self.logger.error(
+                        f"Error in {hook_name} from {plugin.__class__.__name__}: {e}"
+                    )
+        return value
+
+    async def _apply_tool_call_hooks(self, tool_name: str, arguments: dict):
+        tool_call = ToolCall(name=tool_name, arguments=arguments.copy())
+        modified = await self._apply_hook("hook_modify_tool_call", tool_call)
+        return modified.arguments
+
+    async def _apply_tool_result_hooks(self, tool_result):
+        return await self._apply_hook("hook_modify_tool_result", tool_result)
+
+    async def _apply_model_response_hooks(self, content: str):
+        return await self._apply_hook("hook_modify_model_response", content)
+
+    def log_item(self, item_type: str, extra: dict):
+        structured = {"log_type": item_type, **extra}
+        self.logger.info(
+            f"{item_type.replace('_', ' ').title()} received", extra={"structured": structured}
+        )
+
+    async def step(self, chunk=None):
+        if chunk is None:
+            return None
+
+        if chunk.type == "response.output_item.done":
+            item = chunk.item
+            if item.type == "function_call":
+                self.log_item(
+                    "tool_call",
+                    {
+                        "tool_name": item.name,
+                        "arguments": item.arguments,
+                        "call_id": item.call_id,
+                    },
+                )
+                tool_result = await self.tool_registry.execute_tool_openai_response_api(
+                    item,
+                    tool_call_hook=self._apply_tool_call_hooks,
+                    tool_result_hook=self._apply_tool_result_hooks,
+                )
+                self.log_item(
+                    "tool_result", {"tool_name": item.name, "result": tool_result["output"]}
+                )
+                return tool_result
+
+            if item.type == "reasoning":
+                reasoning_content = "\n".join([x.text for x in item.summary])
+                if reasoning_content.strip():
+                    self.log_item("reasoning", {"content": reasoning_content})
+                return None
+
+            if item.type in ["output_text", "message"]:
+                if item.type == "output_text":
+                    content_text = item.text
+                else:
+                    if isinstance(item.content, list):
+                        content_text = "".join(
+                            c.text if hasattr(c, "text") else str(c) for c in item.content
+                        )
+                    else:
+                        content_text = str(item.content)
+
+                payload = {"content": content_text}
+                if item.type == "message":
+                    role = getattr(item, "role", None)
+                    if role is not None:
+                        payload["role"] = role
+                self.log_item(item.type, payload)
+
+                if content_text.strip() and (
+                    item.type == "output_text" or getattr(item, "role", None) == "assistant"
+                ):
+                    await self._apply_model_response_hooks(content_text)
+                return None
+
+            self.logger.info(f"STREAM: UNKNOWN ITEM: {item}")
+            return None
+
+        if chunk.type == "response.error":
+            self.logger.error(f"Stream error: {chunk}")
+        return None
+
+
 class Agent:
     def __init__(
         self,
@@ -51,21 +188,8 @@ class Agent:
         # Create agent-specific logger with automatic agent_id injection
         self.logger = AgentLoggerAdapter(logger, agent_id or "main")
 
-        # Set up tool registry and register tools from all plugins
-        self.tool_registry = ToolRegistry()
-        for plugin in self.plugins:
-            if hasattr(plugin, "hook_provide_tools"):
-                for method in plugin.hook_provide_tools():
-                    self.tool_registry.register_callable(method)
-
-        # Get auto-generated tool schemas
-        self.tools = self.tool_registry.get_schemas()
-
-        # Set base system prompt (passed from app)
-        self.instructions = system_prompt
-
-        # Collect and append plugin system prompt additions
-        self._prepare_system_prompt()
+        # Initialize environment which manages tools and system prompt
+        self.env = Environment(system_prompt, self.plugins, self.logger)
 
     async def _apply_hook(self, hook_name: str, value):
         """Generic hook application helper that handles None returns gracefully.
@@ -95,54 +219,9 @@ class Agent:
 
         return value
 
-    def _prepare_system_prompt(self):
-        """Collect system prompt additions and update instructions."""
-        self.plugin_system_prompts = []
-        for plugin in self.plugins:
-            if hasattr(plugin, "hook_provide_system_prompt"):
-                try:
-                    addition = plugin.hook_provide_system_prompt()
-                    if addition and addition.strip():
-                        self.plugin_system_prompts.append(addition.strip())
-                except Exception as e:
-                    logger.error(
-                        f"Error collecting system prompt from {plugin.__class__.__name__}: {e}"
-                    )
-
-        if self.plugin_system_prompts:
-            combined_additions = "\n\n".join(self.plugin_system_prompts)
-            self.instructions = f"{self.instructions}\n\n{combined_additions}"
-
-    async def _apply_tool_result_hooks(self, tool_result):
-        """Apply tool result modification hooks from all plugins."""
-        return await self._apply_hook("hook_modify_tool_result", tool_result)
-
     async def _apply_user_message_hooks(self, message):
         """Apply user message modification hooks from all plugins."""
         return await self._apply_hook("hook_modify_user_message", message)
-
-    async def _apply_model_response_hooks(self, content: str):
-        """Apply model response hooks from all plugins. Returns modified content for presentation."""
-        return await self._apply_hook("hook_modify_model_response", content)
-
-    async def _apply_tool_call_hooks(self, tool_name: str, arguments: dict):
-        """Apply tool call modification hooks from all plugins. Returns modified arguments."""
-        # Create ToolCall object for cleaner hook interface
-        tool_call = ToolCall(name=tool_name, arguments=arguments.copy())
-
-        # Apply hooks - they may return a modified ToolCall or None
-        modified_tool_call = await self._apply_hook("hook_modify_tool_call", tool_call)
-
-        # Extract arguments from the potentially modified ToolCall
-        return modified_tool_call.arguments
-
-    def log_item(self, item_type: str, extra: dict):
-        """Log a structured item event."""
-        structured_data = {"log_type": item_type, **extra}
-        self.logger.info(
-            f"{item_type.replace('_', ' ').title()} received",
-            extra={"structured": structured_data},
-        )
 
     async def run(self, message: str | None = None):
         """Process a single message with tool call loop."""
@@ -189,8 +268,8 @@ class Agent:
         create_args = {
             "model": self.model_name,
             "input": self.conversation_context,  # Use local context (cookbook pattern)
-            "instructions": self.instructions,
-            "tools": self.tools,
+            "instructions": self.env.instructions(),
+            "tools": self.env.tool_schemas("openai"),
             "tool_choice": "auto",
             "store": False,  # Zero data retention
             "stream": True,
@@ -212,84 +291,16 @@ class Agent:
 
         # Process streaming events
         async for chunk in stream:
-            if chunk.type == "response.output_item.done":
-                # Log each output item as it completes
-                item = chunk.item
-                if item.type == "function_call":
-                    self.log_item(
-                        "tool_call",
-                        {
-                            "tool_name": item.name,
-                            "arguments": item.arguments,
-                            "call_id": item.call_id,
-                        },
-                    )
-
-                    # Execute tool with both hooks
-                    tool_result = (
-                        await self.tool_registry.execute_tool_openai_response_api(
-                            item,
-                            tool_call_hook=self._apply_tool_call_hooks,
-                            tool_result_hook=self._apply_tool_result_hooks,
-                        )
-                    )
-
-                    # Check if this tool result indicates we should stop
-                    if tool_result.get("stop_run", False):
-                        should_stop = True
-
-                    # Remove stop_run flag before adding to context (OpenAI API doesn't accept it)
-                    clean_tool_result = {
-                        k: v for k, v in tool_result.items() if k != "stop_run"
-                    }
-
-                    tool_results.append(clean_tool_result)
-                    self.log_item(
-                        "tool_result",
-                        {"tool_name": item.name, "result": clean_tool_result["output"]},
-                    )
-
-                elif item.type == "reasoning":
-                    reasoning_content = "\n".join([x.text for x in item.summary])
-                    if reasoning_content.strip():  # Only log if there's actual content
-                        self.log_item("reasoning", {"content": reasoning_content})
-                elif item.type in ["output_text", "message"]:
-                    # Extract text
-                    if item.type == "output_text":
-                        content_text = item.text
-                    else:  # message
-                        if isinstance(item.content, list):
-                            content_text = "".join(
-                                c.text if hasattr(c, "text") else str(c)
-                                for c in item.content
-                            )
-                        else:
-                            content_text = str(item.content)
-
-                    # Log it (include role when available for message items)
-                    log_payload = {"content": content_text}
-                    if item.type == "message":
-                        role = getattr(item, "role", None)
-                        if role is not None:
-                            log_payload["role"] = role
-                    self.log_item(item.type, log_payload)
-
-                    # Apply hooks if needed
-                    if content_text.strip() and (
-                        item.type == "output_text"
-                        or getattr(item, "role", None) == "assistant"
-                    ):
-                        await self._apply_model_response_hooks(
-                            content_text
-                        )
-                else:
-                    self.logger.info(f"STREAM: UNKNOWN ITEM: {item}")
-
-            elif chunk.type == "response.completed":
-                # Response completed - store the complete response output
+            result = await self.env.step(chunk)
+            if result:
+                if result.get("stop_run"):
+                    should_stop = True
+                # Remove stop_run before storing
+                clean_result = {k: v for k, v in result.items() if k != "stop_run"}
+                tool_results.append(clean_result)
+            if chunk.type == "response.completed":
                 self.conversation_context.extend(chunk.response.output)
 
-        # Add tool results to context if any
         if tool_results:
             self.conversation_context.extend(tool_results)
 
