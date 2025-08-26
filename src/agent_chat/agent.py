@@ -99,6 +99,11 @@ class Environment:
 
     async def step(self, chunk=None):
         if chunk is None:
+            for plugin in self.plugins:
+                if hasattr(plugin, "has_messages") and plugin.has_messages():
+                    message = await plugin.read_message()
+                    self.log_item("user_input", {"content": message})
+                    return message
             return None
 
         if chunk.type == "response.output_item.done":
@@ -241,12 +246,6 @@ class Agent:
         while iterations < self.max_iterations:
             # Process using current context
             tool_results, should_stop = await self._handle_streaming_response()
-
-            # If no tool calls, conversation is complete
-            if not tool_results:
-                break
-
-            # If any tool requested stop, break the loop
             if should_stop:
                 self.logger.info(
                     "Tool loop ending",
@@ -260,7 +259,18 @@ class Agent:
                 )
                 break
 
-            iterations += 1
+            if tool_results:
+                iterations += 1
+                continue
+
+            next_msg = await self.env.step()
+            if next_msg:
+                next_msg = await self._apply_user_message_hooks(next_msg)
+                self.conversation_context.append({"role": "user", "content": next_msg})
+                iterations += 1
+                continue
+
+            break
 
     async def _handle_streaming_response(self):
         """Handle streaming response with immediate tool execution and context building."""

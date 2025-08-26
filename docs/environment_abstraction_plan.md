@@ -6,7 +6,8 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 - ✅ **Phase 1** – Environment skeleton created inside `agent.py` with `instructions()`, `tool_schemas()`, and a pass-through `step()`.
 - ✅ **Phase 2** – System prompt assembly and `ToolRegistry` ownership moved into `Environment`.
 - ✅ **Phase 3** – Provider event handling delegated to `Environment.step()` and tool logic removed from `Agent`.
-- ⏳ **Phases 4–6** – Follow-up input polling, policies/observability, and cleanup remain.
+- ✅ **Phase 4** – Follow-up input polling via `env.step()` with no arguments.
+- ⏳ **Phases 5–6** – Policies/observability and cleanup remain.
 
 ## Phase 1: Introduce Environment Skeleton *(completed)*
 - [x] Create an `Environment` class inside `agent.py` to keep the initial change small.
@@ -33,10 +34,10 @@ This plan outlines phased steps to introduce the Environment abstraction propose
   - [x] Perform side effects as needed and return `None`.
 - [x] Remove tool execution and hook logic from `agent.py`.
 
-## Phase 4: Poll for Follow-up Input *(next)*
-- [ ] Implement `env.step()` with no arguments to poll for queued user/system messages.
-- [ ] Environment formats and returns the next user message string or `None` if there is no message or policies prevent continuation.
-- [ ] Replace any existing queue or injection logic in the Agent with calls to `env.step()`.
+## Phase 4: Poll for Follow-up Input *(completed)*
+- [x] Implement `env.step()` with no arguments to poll for queued user/system messages.
+- [x] Environment formats and returns the next user message string or `None` if there is no message or policies prevent continuation.
+- [x] Replace existing queue or injection logic in the Agent with calls to `env.step()`.
 
 ## Phase 5: Consolidate Policies and Observability *(next)*
 - [ ] Track pause/interrupt states, budgets, and other policies inside `Environment`.
