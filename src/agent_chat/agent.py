@@ -23,6 +23,54 @@ class AgentLoggerAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
+class Environment:
+    """Environment owns tools and system prompt assembly."""
+
+    def __init__(self, base_system_prompt: str, plugins: list):
+        self.base_system_prompt = base_system_prompt
+        self.plugins = plugins
+
+        # Initialize tool registry and register plugin tools
+        self.tool_registry = ToolRegistry()
+        for plugin in plugins:
+            if hasattr(plugin, "hook_provide_tools"):
+                for method in plugin.hook_provide_tools():
+                    self.tool_registry.register_callable(method)
+
+        # Build complete system prompt
+        self._instructions = self._assemble_system_prompt()
+
+    def _assemble_system_prompt(self) -> str:
+        instructions = self.base_system_prompt
+        additions = []
+        for plugin in self.plugins:
+            if hasattr(plugin, "hook_provide_system_prompt"):
+                try:
+                    addition = plugin.hook_provide_system_prompt()
+                    if addition and addition.strip():
+                        additions.append(addition.strip())
+                except Exception as e:
+                    logger.error(
+                        f"Error collecting system prompt from {plugin.__class__.__name__}: {e}"
+                    )
+        if additions:
+            instructions = f"{instructions}\n\n" + "\n\n".join(additions)
+        return instructions
+
+    def instructions(self) -> str:
+        """Return the assembled system prompt."""
+        return self._instructions
+
+    def tool_schemas(self, provider: str) -> list:
+        """Return provider-shaped tool schemas."""
+        # Provider is unused in this phase but kept for compatibility
+        return self.tool_registry.get_schemas()
+
+    def step(self, chunk=None):
+        """Pass-through placeholder for future stream handling."""
+        return None
+
+
 class Agent:
     def __init__(
         self,
@@ -51,21 +99,11 @@ class Agent:
         # Create agent-specific logger with automatic agent_id injection
         self.logger = AgentLoggerAdapter(logger, agent_id or "main")
 
-        # Set up tool registry and register tools from all plugins
-        self.tool_registry = ToolRegistry()
-        for plugin in self.plugins:
-            if hasattr(plugin, "hook_provide_tools"):
-                for method in plugin.hook_provide_tools():
-                    self.tool_registry.register_callable(method)
+        # Initialize environment which manages tools and system prompt
+        self.env = Environment(system_prompt, self.plugins)
 
-        # Get auto-generated tool schemas
-        self.tools = self.tool_registry.get_schemas()
-
-        # Set base system prompt (passed from app)
-        self.instructions = system_prompt
-
-        # Collect and append plugin system prompt additions
-        self._prepare_system_prompt()
+        # Keep direct registry reference while tool execution remains here
+        self.tool_registry = self.env.tool_registry
 
     async def _apply_hook(self, hook_name: str, value):
         """Generic hook application helper that handles None returns gracefully.
@@ -94,24 +132,6 @@ class Agent:
                     )
 
         return value
-
-    def _prepare_system_prompt(self):
-        """Collect system prompt additions and update instructions."""
-        self.plugin_system_prompts = []
-        for plugin in self.plugins:
-            if hasattr(plugin, "hook_provide_system_prompt"):
-                try:
-                    addition = plugin.hook_provide_system_prompt()
-                    if addition and addition.strip():
-                        self.plugin_system_prompts.append(addition.strip())
-                except Exception as e:
-                    logger.error(
-                        f"Error collecting system prompt from {plugin.__class__.__name__}: {e}"
-                    )
-
-        if self.plugin_system_prompts:
-            combined_additions = "\n\n".join(self.plugin_system_prompts)
-            self.instructions = f"{self.instructions}\n\n{combined_additions}"
 
     async def _apply_tool_result_hooks(self, tool_result):
         """Apply tool result modification hooks from all plugins."""
@@ -189,8 +209,8 @@ class Agent:
         create_args = {
             "model": self.model_name,
             "input": self.conversation_context,  # Use local context (cookbook pattern)
-            "instructions": self.instructions,
-            "tools": self.tools,
+            "instructions": self.env.instructions(),
+            "tools": self.env.tool_schemas("openai"),
             "tool_choice": "auto",
             "store": False,  # Zero data retention
             "stream": True,
@@ -212,6 +232,8 @@ class Agent:
 
         # Process streaming events
         async for chunk in stream:
+            # Phase 1 environment hook (no-op)
+            self.env.step(chunk)
             if chunk.type == "response.output_item.done":
                 # Log each output item as it completes
                 item = chunk.item
