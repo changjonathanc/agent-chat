@@ -6,7 +6,7 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 - ✅ **Phase 1** – Environment skeleton created inside `agent.py` with `instructions()`, `tool_schemas()`, and a pass-through `step()`.
 - ✅ **Phase 2** – System prompt assembly and `ToolRegistry` ownership moved into `Environment`.
 - ✅ **Phase 3** – Provider event handling delegated to `Environment.step()` and tool logic removed from `Agent`.
-- ✅ **Phase 4** – Follow-up input polling via `env.step()` with no arguments.
+- ✅ **Phase 4** – Follow-up input polling via `ChatEnvironment.poll_message()`.
 - ⏳ **Phases 5–6** – Policies/observability and cleanup remain.
 
 ## Phase 1: Introduce Environment Skeleton *(completed)*
@@ -14,7 +14,7 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 - [x] Implement minimal interfaces:
   - `instructions()` returns the existing system prompt.
   - `tool_schemas(provider)` returns current tool schema list.
-  - `step(chunk=None)` acts as a pass-through and returns `None`.
+  - `step(chunk)` acts as a pass-through and returns `None`.
 - [x] Instantiate `Environment` in the Agent and call `env.instructions()` and `env.tool_schemas()` when invoking the provider.
 - [x] Ensure existing behavior is preserved and tests still pass.
 
@@ -35,9 +35,9 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 - [x] Remove tool execution and hook logic from `agent.py`.
 
 ## Phase 4: Poll for Follow-up Input *(completed)*
-- [x] Implement `env.step()` with no arguments to poll for queued user/system messages.
+- [x] Introduce `ChatEnvironment` with a `poll_message()` method.
 - [x] Environment formats and returns the next user message string or `None` if there is no message or policies prevent continuation.
-- [x] Replace existing queue or injection logic in the Agent with calls to `env.step()`.
+- [x] Agent polls for messages using `env.poll_message()` instead of `env.step()`.
 
 ## Phase 5: Consolidate Policies and Observability *(next)*
 - [ ] Track pause/interrupt states, budgets, and other policies inside `Environment`.

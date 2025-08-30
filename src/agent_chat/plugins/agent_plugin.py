@@ -57,14 +57,12 @@ class SubAgentPlugin:
 
         return "Update sent"
 
-    async def read_message(self):
-        """Read next message from inbox."""
-        message = await self.inbox.get()
-        return message
-
-    def has_messages(self):
-        """Check if there are pending messages."""
-        return not self.inbox.empty()
+    async def _read_all_messages(self):
+        """Read and combine pending messages from inbox."""
+        first = await self.inbox.get()
+        others = collect_all_pending(self.inbox)
+        messages = [first, *others]
+        return "\n".join(messages)
 
     def hook_provide_tools(self):
         """Provide tools for the sub-agent."""
@@ -179,7 +177,7 @@ class SubAgentRunner:
         while not self.stop_event.is_set():
             try:
                 # Wait for message
-                message = await self.sub_agent_plugin.read_message()
+                message = await self.sub_agent_plugin._read_all_messages()
 
                 # Process message
                 logger.info(f"SUB_AGENT[{self.name}]: Processing message")
@@ -440,7 +438,9 @@ You can spawn and manage sub-agents to handle tasks in parallel:
   - If agent_name is None, waits for ANY agent to respond
   - Can be interrupted by user input
 
-**Important**: When waiting for sub-agent responses, if the user sends new input, you will be interrupted. However, the sub-agents continue working in the background. You can:
+  **Important**: When waiting for sub-agent responses, if the user sends new input,
+  you will be interrupted. However, the sub-agents continue working in the background.
+  You can:
 1. Respond to the user's new request immediately
 2. Use wait_for_agent() again later to check for updates
 3. Send a message asking agents to wrap up gracefully
@@ -453,5 +453,6 @@ Example workflow:
 4. Use wait_for_agent() when convenient to collect findings
 5. Use stop_agent() once an agent's task is done.
 
-**Note**: Sub-agent updates are automatically injected after each tool execution, so you'll see their progress naturally as you work.
+  **Note**: Sub-agent updates are automatically injected after each tool execution,
+  so you'll see their progress naturally as you work.
 """

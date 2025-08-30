@@ -97,15 +97,7 @@ class Environment:
             f"{item_type.replace('_', ' ').title()} received", extra={"structured": structured}
         )
 
-    async def step(self, chunk=None):
-        if chunk is None:
-            for plugin in self.plugins:
-                if hasattr(plugin, "has_messages") and plugin.has_messages():
-                    message = await plugin.read_message()
-                    self.log_item("user_input", {"content": message})
-                    return message
-            return None
-
+    async def step(self, chunk):
         if chunk.type == "response.output_item.done":
             item = chunk.item
             if item.type == "function_call":
@@ -194,7 +186,9 @@ class Agent:
         self.logger = AgentLoggerAdapter(logger, agent_id or "main")
 
         # Initialize environment which manages tools and system prompt
-        self.env = Environment(system_prompt, self.plugins, self.logger)
+        from .chat_environment import ChatEnvironment
+
+        self.env = ChatEnvironment(system_prompt, self.plugins, self.logger)
 
     async def _apply_hook(self, hook_name: str, value):
         """Generic hook application helper that handles None returns gracefully.
@@ -263,7 +257,7 @@ class Agent:
                 iterations += 1
                 continue
 
-            next_msg = await self.env.step()
+            next_msg = await self.env.poll_message()
             if next_msg:
                 next_msg = await self._apply_user_message_hooks(next_msg)
                 self.conversation_context.append({"role": "user", "content": next_msg})

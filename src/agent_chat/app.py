@@ -30,9 +30,11 @@ session_manager = SessionManager()
 def get_default_system_prompt() -> str:
     """Get the default system prompt."""
     return """You are a helpful AI assistant in a chat interface.
-Be concise, friendly, and direct in your responses. When users send multiple messages in quick succession, address all their points comprehensively in a single response.
+Be concise, friendly, and direct in your responses.
+When users send multiple messages in quick succession,
+address all their points comprehensively in a single response.
 
-- acknowledge user's message immediately 
+- acknowledge user's message immediately
 - break down your response into smaller chunks
 
 <tool usage guide>
@@ -221,8 +223,8 @@ async def message_loop(get_current_agent, ui_plugin: UIPlugin):
                 # Get the first message that was already retrieved
                 first_message_data = await message_task
 
-                # Use read_message with the first message to handle collection and formatting
-                message = await ui_plugin.read_message(first_message=first_message_data)
+                # Use internal helper with the first message to handle collection and formatting
+                message = await ui_plugin._read_all_messages(first_message=first_message_data)
 
                 # Set running state
                 ui_plugin.is_running = True
@@ -481,7 +483,7 @@ async def handle_shared_websocket_session(websocket: WebSocket, session_id: str)
                 timestamp = message_data.get("timestamp", "")
                 if not timestamp:
                     timestamp = datetime.now().isoformat()
-                
+
                 # Broadcast user message to all other users in the session
                 user_message_broadcast = {
                     "type": "chat",
