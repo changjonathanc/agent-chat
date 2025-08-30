@@ -152,6 +152,9 @@ class Environment:
             self.logger.info(f"STREAM: UNKNOWN ITEM: {item}")
             return None
 
+        if chunk.type == "response.completed":
+            return chunk.response.output
+
         if chunk.type == "response.error":
             self.logger.error(f"Stream error: {chunk}")
         return None
@@ -297,13 +300,14 @@ class Agent:
         async for chunk in stream:
             result = await self.env.step(chunk)
             if result:
-                if result.get("stop_run"):
-                    should_stop = True
-                # Remove stop_run before storing
-                clean_result = {k: v for k, v in result.items() if k != "stop_run"}
-                tool_results.append(clean_result)
-            if chunk.type == "response.completed":
-                self.conversation_context.extend(chunk.response.output)
+                if isinstance(result, list):
+                    self.conversation_context.extend(result)
+                else:
+                    if result.get("stop_run"):
+                        should_stop = True
+                    # Remove stop_run before storing
+                    clean_result = {k: v for k, v in result.items() if k != "stop_run"}
+                    tool_results.append(clean_result)
 
         if tool_results:
             self.conversation_context.extend(tool_results)
