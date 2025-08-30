@@ -39,7 +39,7 @@ address all their points comprehensively in a single response.
 
 <tool usage guide>
 - you can use multiple tools in parallel in a single turn
-- use as many tools in a single turn as possible to minimaize latency
+- use as many tools in a single turn as possible to minimize latency
 example:
 - send_message to notify user what you are going to search, and at the same time, call the actual web search
 </tool usage guide>"""
