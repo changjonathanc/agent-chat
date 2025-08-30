@@ -289,8 +289,8 @@ class Agent:
         try:
             stream = await self.client.responses.create(**create_args)
         except Exception as e:
-            logger.error(f"Error creating response: {e}")
-            logger.error(f"{self.conversation_context=}")
+            self.logger.error(f"Error creating response: {e}")
+            self.logger.error(f"{self.conversation_context=}")
             return [], False
 
         tool_results = []
