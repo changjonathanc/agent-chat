@@ -65,10 +65,6 @@ class BaseUIPlugin:
         dt = dt.astimezone(tz)
         return dt.strftime(f"%Y-%m-%d %H:%M:%S {self.timezone_name}")
 
-    def has_messages(self):
-        """Check if there are messages in the queue."""
-        return not self.message_queue.empty()
-
     def log(self, content: str) -> None:
         """Send a log message to the UI asynchronously."""
         asyncio.create_task(self._send_internal_message(content, message_type="log"))
@@ -167,7 +163,7 @@ class BaseUIPlugin:
             self.is_running = False
             self.status = "Waiting for response"
             await self._send_state_update()
-            user_response = await self.read_message()
+            user_response = await self._read_all_messages()
             self.is_running = prev_state
             self.status = prev_status
             await self._send_state_update()
@@ -189,24 +185,20 @@ class BaseUIPlugin:
         }
         await self._send_to_ui(message_data)
 
-    async def read_message(self, first_message=None):
+    async def _read_all_messages(self, first_message=None):
         """Read and combine all pending messages from queue."""
-        # Get first message (blocking - efficient async wait or use provided)
         if first_message is None:
             first_message_data = await self.message_queue.get()
         else:
             first_message_data = first_message
 
-        # Immediately collect all additional pending messages (non-blocking)
         additional_messages = collect_all_pending(self.message_queue)
         messages = [first_message_data] + additional_messages
 
-        # Send read receipts for all collected messages that have message_ids
         message_ids = [msg_data["message_id"] for msg_data in messages if "message_id" in msg_data]
         if message_ids:
             await self._send_to_ui({"type": "read_receipt", "message_ids": message_ids})
 
-        # Format all messages for the model
         return await self._format_messages_for_model(messages)
 
     def hook_provide_tools(self):
@@ -221,11 +213,14 @@ class BaseUIPlugin:
 - You should only communicate with user using the send_message tool.
 - Only the payload of the send_message tool will be visible to the user.
 - Any response you send outside of the send_message tool will NOT be visible.
-- The send_message tool also accepts an optional `wait_for_response` flag. When true it waits for the next user message and returns it. Use it for internal monologues or messages to the system admin.
+  - The send_message tool also accepts an optional `wait_for_response` flag.
+    When true it waits for the next user message and returns it.
+    Use it for internal monologues or messages to the system admin.
 
 When communicating with users:
 - Use send_message() to send responses immediately to the user
-- You can split the response into multiple parts using the send_message tool. Each part will be sent as a separate message to the user.
+  - You can split the response into multiple parts using the send_message tool.
+    Each part will be sent as a separate message to the user.
 - Each send_message call creates a separate message bubble in the UI
 - Use send_message strategically to provide updates during long-running operations
 - Use stop=True to finish responding to the user.
@@ -246,8 +241,8 @@ When communicating with users:
             return tool_result
 
         # Only check for new messages if not paused
-        if self.has_messages():
-            new_message = await self.read_message()
+        if not self.message_queue.empty():
+            new_message = await self._read_all_messages()
             logging.getLogger(__name__).info(
                 "SYSTEM: cleared message queue and put it in tool result"
             )
