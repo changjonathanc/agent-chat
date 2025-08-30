@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from queue import Empty as QueueEmpty
+
 from .agent import Environment
 from .utils import collect_all_pending
 
@@ -10,14 +13,18 @@ class ChatEnvironment(Environment):
     async def poll_message(self):
         for plugin in self.plugins:
             queue = getattr(plugin, "message_queue", None) or getattr(plugin, "inbox", None)
-            if queue and not queue.empty():
+            if not queue:
+                continue
+            try:
                 if hasattr(plugin, "_read_all_messages"):
                     message = await plugin._read_all_messages()
                 else:
-                    first = await queue.get()
+                    first = queue.get_nowait()
                     extras = collect_all_pending(queue)
                     parts = [first, *extras]
                     message = "\n".join(parts) if isinstance(first, str) else first
-                self.log_item("user_input", {"content": message})
-                return message
+            except (asyncio.QueueEmpty, QueueEmpty):
+                continue
+            self.log_item("user_input", {"content": message})
+            return message
         return None
