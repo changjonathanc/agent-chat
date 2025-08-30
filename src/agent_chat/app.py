@@ -360,6 +360,12 @@ async def get():
     return FileResponse(str(TEMPLATES_DIR / "index.html"))
 
 
+@app.get("/favicon.svg")
+async def favicon():
+    """Serve the site favicon."""
+    return FileResponse(str(TEMPLATES_DIR / "favicon.svg"))
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
