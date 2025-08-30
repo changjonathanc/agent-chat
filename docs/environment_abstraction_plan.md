@@ -13,7 +13,7 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 - [x] Create an `Environment` class inside `agent.py` to keep the initial change small.
 - [x] Implement minimal interfaces:
   - `instructions()` returns the existing system prompt.
-  - `tool_schemas(provider)` returns current tool schema list.
+  - `tool_schemas()` returns current tool schema list (OpenAI schema).
   - `step(chunk)` acts as a pass-through and returns `None`.
 - [x] Instantiate `Environment` in the Agent and call `env.instructions()` and `env.tool_schemas()` when invoking the provider.
 - [x] Ensure existing behavior is preserved and tests still pass.
@@ -21,7 +21,7 @@ This plan outlines phased steps to introduce the Environment abstraction propose
 ## Phase 2: Move Prompt and Tool Ownership *(completed)*
 - [x] Move system prompt assembly logic from `agent.py` into `Environment.instructions()`.
 - [x] Relocate `ToolRegistry` creation and registration into `Environment`.
-- [x] Update `env.tool_schemas(provider)` to build provider-shaped schemas using the registry.
+- [x] Update `env.tool_schemas()` to build schemas using the registry.
 - [x] Remove equivalent code from `agent.py`.
 
 ## Phase 3: Handle Provider Events *(completed)*

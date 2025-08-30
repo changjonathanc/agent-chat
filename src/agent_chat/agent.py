@@ -62,9 +62,12 @@ class Environment:
         """Return the assembled system prompt."""
         return self._instructions
 
-    def tool_schemas(self, provider: str) -> list:
-        """Return provider-shaped tool schemas."""
-        # Provider is unused in this phase but kept for compatibility
+    def tool_schemas(self) -> list:
+        """Return tool schemas.
+
+        We only support the OpenAI tool schema now, so the provider
+        parameter has been dropped from this interface.
+        """
         return self.tool_registry.get_schemas()
 
     async def _apply_hook(self, hook_name: str, value):
@@ -276,7 +279,7 @@ class Agent:
             "model": self.model_name,
             "input": self.conversation_context,  # Use local context (cookbook pattern)
             "instructions": self.env.instructions(),
-            "tools": self.env.tool_schemas("openai"),
+            "tools": self.env.tool_schemas(),
             "tool_choice": "auto",
             "store": False,  # Zero data retention
             "stream": True,
